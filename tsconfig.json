@@ -1,0 +1,23 @@
+{
+  "compilerOptions": {
+    "allowJs": true,
+    "resolveJsonModule": true,
+    "alwaysStrict": true,
+    "baseUrl": ".",
+    "checkJs": true,
+    "declaration": true,
+    "declarationMap": true,
+    "forceConsistentCasingInFileNames": true,
+    "incremental": true,
+    "strict": false,
+    "strictNullChecks": false,
+    "allowSyntheticDefaultImports": true
+  },
+  "include": ["src/**/*", "types/*", "server.ts", "node_modules/vite/types/*", "client.d.ts"],
+  "ts-node": {
+    "transpileOnly": true,
+    "compilerOptions": {
+      "module": "CommonJS"
+    }
+  }
+}

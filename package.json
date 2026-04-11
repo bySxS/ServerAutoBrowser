@@ -1,0 +1,24 @@
+{
+  "name": "server_auto_browser",
+  "version": "1.0.0",
+  "description": "Server Auto Browser by SxS",
+  "main": "server.ts",
+  "scripts": {
+    "start": "tsx watch server.ts"
+  },
+  "author": "SxS",
+  "license": "ISC",
+  "engines": {
+    "node": ">=20.2.0"
+  },
+  "dependencies": {
+    "express": "^5.2.1",
+    "puppeteer": "^24.40.0"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6",
+    "prettier": "^3.4.2",
+    "tsx": "^4.21.0",
+    "typescript": "^5.7.3"
+  }
+}
