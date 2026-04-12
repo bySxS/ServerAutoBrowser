@@ -4,7 +4,8 @@
   "description": "Server Auto Browser by SxS",
   "main": "server.ts",
   "scripts": {
-    "start": "tsx watch server.ts"
+    "start": "tsx watch server.ts",
+    "start:prod": "node ./node_modules/tsx/dist/cli.mjs server.ts"
   },
   "author": "SxS",
   "license": "ISC",

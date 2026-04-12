@@ -6,3 +6,4 @@ build/
 *.log
 *.tsbuildinfo
 .codex
+chrome-user-data/

@@ -18,6 +18,27 @@ function normalizeUrl(input: unknown): string | null {
   }
 }
 
+function normalizeBoolean(input: unknown): boolean {
+  if (typeof input === 'boolean') {
+    return input;
+  }
+
+  if (typeof input !== 'string') {
+    return false;
+  }
+
+  return ['1', 'true', 'yes', 'on'].includes(input.trim().toLowerCase());
+}
+
+function normalizePositiveNumber(input: unknown, fallback: number): number {
+  const parsed = Number(input);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return fallback;
+  }
+
+  return parsed;
+}
+
 async function createServer() {
   const app = express();
 
@@ -34,6 +55,11 @@ async function createServer() {
   app.get('/proxy', async (req: Request, res: Response) => {
     const url = normalizeUrl(req.query.url);
     const responseFormat = req.query.format === 'json' ? 'json' : 'html';
+    const waitForRecaptcha = normalizeBoolean(req.query.waitForRecaptcha);
+    const recaptchaTimeoutMs = normalizePositiveNumber(
+      req.query.recaptchaTimeoutMs,
+      300000,
+    );
 
     if (!url) {
       return res.status(400).json({
@@ -42,7 +68,10 @@ async function createServer() {
     }
 
     try {
-      const result = await openBrowserPuppeteer(url);
+      const result = await openBrowserPuppeteer(url, undefined, undefined, {
+        waitForRecaptcha,
+        recaptchaTimeoutMs,
+      });
 
       if (responseFormat === 'json') {
         const cookieText = result.cookies
@@ -71,6 +100,11 @@ async function createServer() {
   app.post('/api', async (req: Request, res: Response) => {
     const { cookies, actions } = req.body;
     const url = normalizeUrl(req.body?.url);
+    const waitForRecaptcha = normalizeBoolean(req.body?.waitForRecaptcha);
+    const recaptchaTimeoutMs = normalizePositiveNumber(
+      req.body?.recaptchaTimeoutMs,
+      300000,
+    );
     console.log('url', url, req.body);
     if (!url) {
       return res
@@ -79,7 +113,10 @@ async function createServer() {
     }
 
     try {
-      const result = await openBrowserPuppeteer(url, cookies, actions);
+      const result = await openBrowserPuppeteer(url, cookies, actions, {
+        waitForRecaptcha,
+        recaptchaTimeoutMs,
+      });
       const cookieText = result?.cookies
         .map(
           cookie =>
