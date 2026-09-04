@@ -1,5 +1,12 @@
-import express, { Request, Response } from 'express';
-import { openBrowserPuppeteer } from './browser-puppeteer';
+import express, { type Request, type Response } from 'express';
+import type { Cookie } from 'puppeteer';
+import { openBrowserPuppeteer } from './browser-puppeteer.ts';
+
+function serializeCookie(cookie: Cookie): string {
+  // Synapse expects one stored cookie per line. Attributes from Set-Cookie are
+  // not valid in the outgoing Cookie header and can corrupt its cookie parser.
+  return `${cookie.name}=${cookie.value}`;
+}
 
 function normalizeUrl(input: unknown): string | null {
   if (typeof input !== 'string' || !input.trim()) {
@@ -74,12 +81,7 @@ async function createServer() {
       });
 
       if (responseFormat === 'json') {
-        const cookieText = result.cookies
-          .map(
-            cookie =>
-              `${cookie.name}=${cookie.value}; expires=${cookie.expires}; path=${cookie.path}; domain=${cookie.domain}; ${cookie.httpOnly ? 'httpOnly' : ''}`,
-          )
-          .join('\r\n');
+        const cookieText = result.cookies.map(serializeCookie).join('\r\n');
 
         return res.json({
           url,
@@ -88,6 +90,7 @@ async function createServer() {
           html: result.content,
           cookies: result.cookies,
           cookieText,
+          userAgent: result.userAgent,
         });
       }
 
@@ -105,7 +108,7 @@ async function createServer() {
       req.body?.recaptchaTimeoutMs,
       300000,
     );
-    console.log('url', url, req.body);
+    console.log('url', url);
     if (!url) {
       return res
         ?.status(400)
@@ -117,17 +120,13 @@ async function createServer() {
         waitForRecaptcha,
         recaptchaTimeoutMs,
       });
-      const cookieText = result?.cookies
-        .map(
-          cookie =>
-            `${cookie.name}=${cookie.value}; expires=${cookie.expires}; path=${cookie.path}; domain=${cookie.domain}; ${cookie.httpOnly ? 'httpOnly' : ''}`,
-        )
-        .join('\r\n');
+      const cookieText = result?.cookies.map(serializeCookie).join('\r\n');
 
       return res?.json({
         html: result?.content,
         cookies: result?.cookies,
         cookieText,
+        userAgent: result.userAgent,
         finalUrl: result.finalUrl,
         title: result.title,
       });

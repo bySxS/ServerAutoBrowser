@@ -2,15 +2,16 @@
   "name": "server_auto_browser",
   "version": "1.0.0",
   "description": "Server Auto Browser by SxS",
+  "type": "module",
   "main": "server.ts",
   "scripts": {
-    "start": "tsx watch server.ts",
-    "start:prod": "node ./node_modules/tsx/dist/cli.mjs server.ts"
+    "start": "node --watch server.ts",
+    "start:prod": "node server.ts"
   },
   "author": "SxS",
   "license": "ISC",
   "engines": {
-    "node": ">=20.2.0"
+    "node": ">=23.6.0"
   },
   "dependencies": {
     "express": "^5.2.1",
@@ -19,7 +20,6 @@
   "devDependencies": {
     "@types/express": "^5.0.6",
     "prettier": "^3.4.2",
-    "tsx": "^4.21.0",
     "typescript": "^5.7.3"
   }
 }

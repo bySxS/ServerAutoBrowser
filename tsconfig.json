@@ -11,7 +11,13 @@
     "incremental": true,
     "strict": false,
     "strictNullChecks": false,
-    "allowSyntheticDefaultImports": true
+    "allowSyntheticDefaultImports": true,
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
+    "skipLibCheck": true
   },
   "include": ["src/**/*", "types/*", "server.ts", "node_modules/vite/types/*", "client.d.ts"],
   "ts-node": {
