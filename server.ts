@@ -100,6 +100,74 @@ async function createServer() {
     }
   });
 
+  app.get('/download', async (req: Request, res: Response) => {
+    const url = normalizeUrl(req.query.url);
+    if (!url) {
+      return res.status(400).json({ error: 'Valid query param "url" is required' });
+    }
+
+    const parsedUrl = new URL(url);
+    if (!/^i\d+\.fastpic\.(org|ru)$/i.test(parsedUrl.hostname)) {
+      return res.status(400).json({ error: 'Only FastPic image URLs are allowed' });
+    }
+
+    const browserHeaders = {
+      accept: 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
+      'accept-language': 'ru-RU,ru;q=0.9,en;q=0.8',
+      'sec-fetch-dest': 'image',
+      'sec-fetch-mode': 'no-cors',
+      'sec-fetch-site': 'same-site',
+      'user-agent':
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) ' +
+        'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36',
+    };
+
+    try {
+      let imageUrl = url;
+      let referer = 'https://fastpic.' +
+        (parsedUrl.hostname.endsWith('.org') ? 'org' : 'ru') + '/';
+      const directMatch = url.match(
+        /^https?:\/\/i(\d+)\.fastpic\.(org|ru)\/big\/(\d+)\/(\d+)\/[^/]+\/([^?]+)/i,
+      );
+
+      if (directMatch) {
+        referer =
+          'https://fastpic.' + directMatch[2] + '/view/' + directMatch[1] + '/' +
+          directMatch[3] + '/' + directMatch[4] + '/' + directMatch[5] + '.html';
+      }
+
+      if (!parsedUrl.searchParams.has('md5') || !parsedUrl.searchParams.has('expires')) {
+        const viewResponse = await fetch(referer, { headers: browserHeaders });
+        if (!viewResponse.ok) {
+          return res.status(viewResponse.status).json({ error: 'FastPic view request failed' });
+        }
+
+        const html = await viewResponse.text();
+        const signedMatch = html.match(
+          /<template><img src="(https?:\/\/i\d+\.fastpic\.(?:org|ru)\/big\/[^"?]+)\?md5=([^&"]+).*?expires=(\d+)/i,
+        );
+        if (!signedMatch) {
+          return res.status(502).json({ error: 'FastPic signed image URL not found' });
+        }
+        imageUrl = signedMatch[1] + '?md5=' + signedMatch[2] +
+          '&expires=' + signedMatch[3];
+      }
+
+      const imageResponse = await fetch(imageUrl, {
+        headers: { ...browserHeaders, referer },
+      });
+      if (!imageResponse.ok) {
+        return res.status(imageResponse.status).json({ error: 'FastPic image request failed' });
+      }
+
+      const image = Buffer.from(await imageResponse.arrayBuffer());
+      res.setHeader('Content-Type', imageResponse.headers.get('content-type') || 'application/octet-stream');
+      res.setHeader('Content-Length', String(image.length));
+      return res.status(200).send(image);
+    } catch (e) {
+      return res.status(500).json({ error: 'Error during FastPic download', details: String(e) });
+    }
+  });
   app.post('/api', async (req: Request, res: Response) => {
     const { cookies, actions } = req.body;
     const url = normalizeUrl(req.body?.url);

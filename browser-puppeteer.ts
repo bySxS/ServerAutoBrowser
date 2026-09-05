@@ -66,36 +66,51 @@ async function waitForRecaptchaSolve(
   page: Page,
   recaptchaTimeoutMs: number,
 ) {
-  const recaptchaFrameSelector = [
-    'iframe[src*="recaptcha"]',
-    'iframe[src*="google.com/recaptcha"]',
-    'iframe[src*="recaptcha.net"]',
-    'iframe[src*="challenges.cloudflare.com"]',
-  ].join(', ');
-
-  const hasRecaptchaFrame = await page.$(recaptchaFrameSelector);
-  if (!hasRecaptchaFrame) {
-    return false;
-  }
-
   console.log(`Captcha challenge detected, waiting up to ${recaptchaTimeoutMs}ms`);
 
   await page.waitForFunction(
     () => {
       const responseFields = Array.from(
         document.querySelectorAll<HTMLTextAreaElement | HTMLInputElement>(
-          'textarea[name="g-recaptcha-response"], input[name="g-recaptcha-response"], input[name="cf-turnstile-response"]',
+          'textarea[name="g-recaptcha-response"], input[name="g-recaptcha-response"]',
         ),
       );
+      const isVisible = (element: Element) => {
+        const style = window.getComputedStyle(element);
+        const rect = element.getBoundingClientRect();
+        return (
+          style.display !== 'none' &&
+          style.visibility !== 'hidden' &&
+          Number(style.opacity) !== 0 &&
+          rect.width > 0 &&
+          rect.height > 0
+        );
+      };
+      const hasVisibleElement = (selector: string) =>
+        Array.from(document.querySelectorAll(selector)).some(isVisible);
 
-      const challengeFrame = document.querySelector(
-        'iframe[src*="recaptcha"], iframe[src*="challenges.cloudflare.com"]',
+      const cloudflareChallenge = hasVisibleElement(
+        'iframe[src*="challenges.cloudflare.com"], '+
+          '#challenge-running, form[action*="__cf_chl"], .cf-turnstile',
+      );
+      const googleChallenge = hasVisibleElement(
+        'iframe[src*="recaptcha"], iframe[src*="google.com/recaptcha"], '+
+          'iframe[src*="recaptcha.net"]',
+      );
+      const challengeTitle =
+        /just a moment|attention required|проверка безопасности|один момент/i.test(
+          document.title,
+        );
+      const googleResponseReady = responseFields.some(
+        field =>
+          field.name === 'g-recaptcha-response' && field.value.trim().length > 0,
       );
 
-      return (
-        responseFields.some(field => field.value.trim().length > 0) ||
-        !challengeFrame
-      );
+      if (cloudflareChallenge || challengeTitle) {
+        return false;
+      }
+
+      return googleResponseReady || !googleChallenge;
     },
     { timeout: recaptchaTimeoutMs, polling: 1000 },
   );
@@ -105,15 +120,37 @@ async function waitForRecaptchaSolve(
 }
 
 async function hasRecaptchaFrame(page: Page) {
-  const recaptchaFrameSelector = [
-    'iframe[src*="recaptcha"]',
-    'iframe[src*="google.com/recaptcha"]',
-    'iframe[src*="recaptcha.net"]',
-    'iframe[src*="challenges.cloudflare.com"]',
-    'input[name="cf-turnstile-response"]',
-  ].join(', ');
+  return page.evaluate(() => {
+    if (
+      /just a moment|attention required|проверка безопасности|один момент/i.test(
+        document.title,
+      )
+    ) {
+      return true;
+    }
 
-  return Boolean(await page.$(recaptchaFrameSelector));
+    const selectors = [
+      'iframe[src*="recaptcha"]',
+      'iframe[src*="google.com/recaptcha"]',
+      'iframe[src*="recaptcha.net"]',
+      'iframe[src*="challenges.cloudflare.com"]',
+      '#challenge-running',
+      'form[action*="__cf_chl"]',
+      '.cf-turnstile',
+    ].join(', ');
+
+    return Array.from(document.querySelectorAll(selectors)).some(element => {
+      const style = window.getComputedStyle(element);
+      const rect = element.getBoundingClientRect();
+      return (
+        style.display !== 'none' &&
+        style.visibility !== 'hidden' &&
+        Number(style.opacity) !== 0 &&
+        rect.width > 0 &&
+        rect.height > 0
+      );
+    });
+  });
 }
 
 function isGoogleSorryPage(pageUrl: string): boolean {
@@ -223,6 +260,47 @@ function normalizeActionSelector(selector: string) {
   }
 
   return normalized;
+}
+
+async function waitForCaptchaOrActionPage(
+  page: Page,
+  actions?: Action[],
+) {
+  const firstFillAction = actions?.find(action => action.type === 'fill');
+  const actionSelector = firstFillAction
+    ? normalizeActionSelector(firstFillAction.selector)
+    : undefined;
+  const timeoutAt = Date.now() + 10000;
+
+  do {
+    if (await hasCaptcha(page)) {
+      return true;
+    }
+
+    if (actionSelector) {
+      const actionElementVisible = await page
+        .$eval(actionSelector, element => {
+          const style = window.getComputedStyle(element);
+          const rect = element.getBoundingClientRect();
+          return (
+            style.display !== 'none' &&
+            style.visibility !== 'hidden' &&
+            Number(style.opacity) !== 0 &&
+            rect.width > 0 &&
+            rect.height > 0
+          );
+        })
+        .catch(() => false);
+
+      if (actionElementVisible) {
+        return false;
+      }
+    }
+
+    await new Promise(resolve => setTimeout(resolve, 250));
+  } while (Date.now() < timeoutAt);
+
+  return hasCaptcha(page);
 }
 
 async function waitForVisibleElement(
@@ -348,17 +426,22 @@ export const openBrowserPuppeteer = async (
 ): Promise<BrowserOpenResult> => {
   const waitForRecaptcha = options?.waitForRecaptcha === true;
   const recaptchaTimeoutMs = options?.recaptchaTimeoutMs ?? 300000;
-  const headless = !waitForRecaptcha;
-  const browser = await puppeteer.launch(getBrowserLaunchOptions(headless));
-  const page = await createConfiguredPage(browser, cookies, headless);
+  let browser = await puppeteer.launch(getBrowserLaunchOptions(true));
+  let page = await createConfiguredPage(browser, cookies, true);
 
   try {
     await navigatePage(page, url);
 
-    if (waitForRecaptcha) {
-      const captchaDetected = await hasCaptcha(page);
+    if (waitForRecaptcha && (await hasCaptcha(page))) {
+      console.log('Captcha detected; reopening Chromium in visible mode');
+      await page.close();
+      await browser.close();
 
-      if (captchaDetected) {
+      browser = await puppeteer.launch(getBrowserLaunchOptions(false));
+      page = await createConfiguredPage(browser, cookies, false);
+      await navigatePage(page, url);
+
+      if (await waitForCaptchaOrActionPage(page, actions)) {
         const waitedForGoogleSorry = await waitForGoogleSorryPageSolve(
           page,
           recaptchaTimeoutMs,
@@ -367,6 +450,10 @@ export const openBrowserPuppeteer = async (
         if (!waitedForGoogleSorry) {
           await waitForRecaptchaSolve(page, recaptchaTimeoutMs);
         }
+
+        await page
+          .waitForNetworkIdle({ idleTime: 750, timeout: 15000 })
+          .catch(() => undefined);
       }
     }
 
