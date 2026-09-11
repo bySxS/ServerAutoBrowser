@@ -1,6 +1,7 @@
 import express, { type Request, type Response } from 'express';
 import type { Cookie } from 'puppeteer';
 import { openBrowserPuppeteer } from './browser-puppeteer.ts';
+import { generateSeoText, SeoError } from './seo-provider.ts';
 
 function serializeCookie(cookie: Cookie): string {
   // Synapse expects one stored cookie per line. Attributes from Set-Cookie are
@@ -46,15 +47,22 @@ function normalizePositiveNumber(input: unknown, fallback: number): number {
   return parsed;
 }
 
+function isSeoRequestAuthorized(req: Request): boolean {
+  const token = process.env.SEO_API_TOKEN?.trim();
+  if (token) return req.get('authorization') === `Bearer ${token}`;
+  const remoteAddress = req.socket.remoteAddress || '';
+  return ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(remoteAddress);
+}
+
 async function createServer() {
   const app = express();
 
-  app.use(express.json());
+  app.use(express.json({ limit: '256kb' }));
   app.use(express.urlencoded({ extended: true }));
 
   app.get('/', (req: Request, res: Response) => {
     return res.status(200).json({
-      message: 'Use POST /api or GET /proxy?url=https://example.com',
+      message: 'Use POST /api, POST /api/seo or GET /proxy?url=https://example.com',
       success: true,
     });
   });
@@ -63,10 +71,7 @@ async function createServer() {
     const url = normalizeUrl(req.query.url);
     const responseFormat = req.query.format === 'json' ? 'json' : 'html';
     const waitForRecaptcha = normalizeBoolean(req.query.waitForRecaptcha);
-    const recaptchaTimeoutMs = normalizePositiveNumber(
-      req.query.recaptchaTimeoutMs,
-      300000,
-    );
+    const recaptchaTimeoutMs = normalizePositiveNumber(req.query.recaptchaTimeoutMs, 300000);
 
     if (!url) {
       return res.status(400).json({
@@ -124,16 +129,24 @@ async function createServer() {
 
     try {
       let imageUrl = url;
-      let referer = 'https://fastpic.' +
-        (parsedUrl.hostname.endsWith('.org') ? 'org' : 'ru') + '/';
+      let referer = 'https://fastpic.' + (parsedUrl.hostname.endsWith('.org') ? 'org' : 'ru') + '/';
       const directMatch = url.match(
         /^https?:\/\/i(\d+)\.fastpic\.(org|ru)\/big\/(\d+)\/(\d+)\/[^/]+\/([^?]+)/i,
       );
 
       if (directMatch) {
         referer =
-          'https://fastpic.' + directMatch[2] + '/view/' + directMatch[1] + '/' +
-          directMatch[3] + '/' + directMatch[4] + '/' + directMatch[5] + '.html';
+          'https://fastpic.' +
+          directMatch[2] +
+          '/view/' +
+          directMatch[1] +
+          '/' +
+          directMatch[3] +
+          '/' +
+          directMatch[4] +
+          '/' +
+          directMatch[5] +
+          '.html';
       }
 
       if (!parsedUrl.searchParams.has('md5') || !parsedUrl.searchParams.has('expires')) {
@@ -149,8 +162,7 @@ async function createServer() {
         if (!signedMatch) {
           return res.status(502).json({ error: 'FastPic signed image URL not found' });
         }
-        imageUrl = signedMatch[1] + '?md5=' + signedMatch[2] +
-          '&expires=' + signedMatch[3];
+        imageUrl = signedMatch[1] + '?md5=' + signedMatch[2] + '&expires=' + signedMatch[3];
       }
 
       const imageResponse = await fetch(imageUrl, {
@@ -161,7 +173,10 @@ async function createServer() {
       }
 
       const image = Buffer.from(await imageResponse.arrayBuffer());
-      res.setHeader('Content-Type', imageResponse.headers.get('content-type') || 'application/octet-stream');
+      res.setHeader(
+        'Content-Type',
+        imageResponse.headers.get('content-type') || 'application/octet-stream',
+      );
       res.setHeader('Content-Length', String(image.length));
       return res.status(200).send(image);
     } catch (e) {
@@ -172,15 +187,14 @@ async function createServer() {
     const { cookies, actions } = req.body;
     const url = normalizeUrl(req.body?.url);
     const waitForRecaptcha = normalizeBoolean(req.body?.waitForRecaptcha);
-    const recaptchaTimeoutMs = normalizePositiveNumber(
-      req.body?.recaptchaTimeoutMs,
-      300000,
-    );
+    const recaptchaTimeoutMs = normalizePositiveNumber(req.body?.recaptchaTimeoutMs, 300000);
     console.log('url', url);
     if (!url) {
       return res
         ?.status(400)
-        ?.json({ error: 'Valid body param "url" is required and must start with http:// or https://' });
+        ?.json({
+          error: 'Valid body param "url" is required and must start with http:// or https://',
+        });
     }
 
     try {
@@ -203,8 +217,69 @@ async function createServer() {
     }
   });
 
-  app.listen(9999, '0.0.0.0', () => {
-    console.log('🚀 Server Auto Browser started http://localhost:9999');
+  app.post('/api/seo', async (req: Request, res: Response) => {
+    const startedAt = Date.now();
+    const requestTitle =
+      typeof req.body?.title === 'string' ? req.body.title.trim().slice(0, 120) : '';
+    const sourceLength =
+      typeof req.body?.description === 'string' ? req.body.description.length : 0;
+
+    console.log(
+      `[SEO] request title="${requestTitle}" sourceLength=${sourceLength}`,
+    );
+    if (!isSeoRequestAuthorized(req)) {
+      console.warn(`[SEO] unauthorized elapsedMs=${Date.now() - startedAt}`);
+      return res.status(401).json({ error: 'Invalid SEO API token' });
+    }
+    try {
+      const generated = await generateSeoText(req.body);
+      console.log(
+        `[SEO] completed provider=${generated.provider} ` +
+          `briefLength=${generated.result.shortDescription.length} ` +
+          `descriptionLength=${generated.result.description.length} ` +
+          `elapsedMs=${Date.now() - startedAt}`,
+      );
+      return res.status(200).json({ success: true, ...generated });
+    } catch (error) {
+      const statusCode = error instanceof SeoError ? error.statusCode : 502;
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(
+        `[SEO] failed status=${statusCode} elapsedMs=${Date.now() - startedAt}:`,
+        message,
+      );
+      return res.status(statusCode).json({ success: false, error: message });
+    }
+  });
+
+  const configuredPort = Number(process.env.PORT);
+  const port =
+    Number.isInteger(configuredPort) &&
+    configuredPort > 0 &&
+    configuredPort <= 65535
+      ? configuredPort
+      : 9999;
+
+  const parentPidArgument = process.argv.find((argument) =>
+    argument.startsWith('--parent-pid='),
+  );
+  const parentPid = Number(parentPidArgument?.slice('--parent-pid='.length));
+  if (Number.isInteger(parentPid) && parentPid > 0) {
+    const parentMonitor = setInterval(() => {
+      try {
+        process.kill(parentPid, 0);
+      } catch {
+        console.log(`Parent process ${parentPid} exited; stopping server`);
+        process.exit(0);
+      }
+    }, 2000);
+    parentMonitor.unref();
+  }
+
+  app.listen(port, '0.0.0.0', () => {
+    if (!process.env.SEO_API_TOKEN) {
+      console.warn('SEO_API_TOKEN is not set; /api/seo accepts localhost requests only');
+    }
+    console.log(`Server Auto Browser started http://localhost:${port}`);
   });
 }
 

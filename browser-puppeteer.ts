@@ -1,9 +1,4 @@
-import puppeteer, {
-  type Browser,
-  type Cookie,
-  type ElementHandle,
-  type Page,
-} from 'puppeteer';
+import puppeteer, { type Browser, type Cookie, type ElementHandle, type Page } from 'puppeteer';
 
 export interface Action {
   type: 'fill' | 'click' | 'select';
@@ -36,12 +31,9 @@ async function waitForPageToSettle(page: Page) {
   ]);
 }
 
-function getBrowserLaunchOptions(
-  headless: boolean,
-): Parameters<typeof puppeteer.launch>[0] {
+function getBrowserLaunchOptions(headless: boolean): Parameters<typeof puppeteer.launch>[0] {
   const executablePath = process.env.PUPPETEER_EXECUTABLE_PATH;
-  const userDataDir =
-    process.env.PUPPETEER_USER_DATA_DIR || './chrome-user-data';
+  const userDataDir = process.env.PUPPETEER_USER_DATA_DIR || './chrome-user-data';
   const launchArgs = [
     '--disable-blink-features=AutomationControlled',
     '--disable-dev-shm-usage',
@@ -62,10 +54,7 @@ function getBrowserLaunchOptions(
   };
 }
 
-async function waitForRecaptchaSolve(
-  page: Page,
-  recaptchaTimeoutMs: number,
-) {
+async function waitForRecaptchaSolve(page: Page, recaptchaTimeoutMs: number) {
   console.log(`Captcha challenge detected, waiting up to ${recaptchaTimeoutMs}ms`);
 
   await page.waitForFunction(
@@ -90,20 +79,17 @@ async function waitForRecaptchaSolve(
         Array.from(document.querySelectorAll(selector)).some(isVisible);
 
       const cloudflareChallenge = hasVisibleElement(
-        'iframe[src*="challenges.cloudflare.com"], '+
+        'iframe[src*="challenges.cloudflare.com"], ' +
           '#challenge-running, form[action*="__cf_chl"], .cf-turnstile',
       );
       const googleChallenge = hasVisibleElement(
-        'iframe[src*="recaptcha"], iframe[src*="google.com/recaptcha"], '+
+        'iframe[src*="recaptcha"], iframe[src*="google.com/recaptcha"], ' +
           'iframe[src*="recaptcha.net"]',
       );
       const challengeTitle =
-        /just a moment|attention required|проверка безопасности|один момент/i.test(
-          document.title,
-        );
+        /just a moment|attention required|проверка безопасности|один момент/i.test(document.title);
       const googleResponseReady = responseFields.some(
-        field =>
-          field.name === 'g-recaptcha-response' && field.value.trim().length > 0,
+        field => field.name === 'g-recaptcha-response' && field.value.trim().length > 0,
       );
 
       if (cloudflareChallenge || challengeTitle) {
@@ -122,9 +108,7 @@ async function waitForRecaptchaSolve(
 async function hasRecaptchaFrame(page: Page) {
   return page.evaluate(() => {
     if (
-      /just a moment|attention required|проверка безопасности|один момент/i.test(
-        document.title,
-      )
+      /just a moment|attention required|проверка безопасности|один момент/i.test(document.title)
     ) {
       return true;
     }
@@ -156,29 +140,23 @@ async function hasRecaptchaFrame(page: Page) {
 function isGoogleSorryPage(pageUrl: string): boolean {
   try {
     const parsedUrl = new URL(pageUrl);
-    return (
-      parsedUrl.hostname === 'www.google.com' &&
-      parsedUrl.pathname.startsWith('/sorry/index')
-    );
+    return parsedUrl.hostname === 'www.google.com' && parsedUrl.pathname.startsWith('/sorry/index');
   } catch {
     return false;
   }
 }
 
-async function waitForGoogleSorryPageSolve(
-  page: Page,
-  recaptchaTimeoutMs: number,
-) {
+async function waitForGoogleSorryPageSolve(page: Page, recaptchaTimeoutMs: number) {
   if (!isGoogleSorryPage(page.url())) {
     return false;
   }
 
   console.log(`Google sorry page detected, waiting up to ${recaptchaTimeoutMs}ms`);
 
-  await page.waitForFunction(
-    () => !window.location.pathname.startsWith('/sorry/index'),
-    { timeout: recaptchaTimeoutMs, polling: 1000 },
-  );
+  await page.waitForFunction(() => !window.location.pathname.startsWith('/sorry/index'), {
+    timeout: recaptchaTimeoutMs,
+    polling: 1000,
+  });
 
   console.log('Google sorry page appears to be passed');
   return true;
@@ -208,7 +186,6 @@ async function applyStealthSettings(page: Page, headless: boolean) {
     Object.defineProperty(navigator, 'webdriver', {
       get: () => undefined,
     });
-
   });
 }
 
@@ -240,16 +217,112 @@ async function createConfiguredPage(
   return page;
 }
 
-async function navigatePage(
-  page: Page,
-  url: string,
-) {
+async function navigatePage(page: Page, url: string, referer?: string) {
   console.log('goto', url);
   await page.goto(url, {
     waitUntil: ['domcontentloaded', 'networkidle0', 'networkidle2', 'load'],
     timeout: 1000000,
-    referer: url,
+    ...(referer ? { referer } : {}),
   });
+}
+
+function getWarmupUrl(targetUrl: string) {
+  try {
+    const parsedUrl = new URL(targetUrl);
+    if (
+      parsedUrl.hostname.toLowerCase() === 'rutracker.org' &&
+      parsedUrl.pathname.startsWith('/forum/') &&
+      parsedUrl.pathname !== '/forum/index.php'
+    ) {
+      return `${parsedUrl.origin}/forum/index.php`;
+    }
+  } catch {
+    // The server validates URLs before calling Puppeteer.
+  }
+
+  return undefined;
+}
+
+function isRutrackerLoginUrl(targetUrl: string) {
+  try {
+    const parsedUrl = new URL(targetUrl);
+    return (
+      parsedUrl.hostname.toLowerCase() === 'rutracker.org' &&
+      parsedUrl.pathname === '/forum/login.php'
+    );
+  } catch {
+    return false;
+  }
+}
+
+function getRutrackerAuthenticatedTarget(loginUrl: string) {
+  const parsedUrl = new URL(loginUrl);
+  const redirectPath = parsedUrl.searchParams.get('redirect');
+  if (redirectPath) {
+    const redirectUrl = new URL(redirectPath, parsedUrl.origin);
+    if (
+      redirectUrl.hostname.toLowerCase() === 'rutracker.org' &&
+      redirectUrl.pathname === '/forum/tracker.php'
+    ) {
+      return redirectUrl.toString();
+    }
+  }
+
+  return `${parsedUrl.origin}/forum/tracker.php`;
+}
+
+async function isRutrackerAuthenticated(page: Page) {
+  return page.evaluate(() => {
+    const logoutElement = document.querySelector(
+      'a[href*="login.php?logout"], ' +
+        'img.log-out-icon[title="Выход"], ' +
+        '.log-out-icon[onclick*="logout"], ' +
+        '[onclick*="post2url"][onclick*="logout"]',
+    );
+    if (logoutElement) {
+      return true;
+    }
+
+    const pageText = document.body?.innerText || '';
+    return /(?:^|\s)Выход\s*\[/i.test(pageText);
+  });
+}
+
+async function navigateToTarget(
+  page: Page,
+  targetUrl: string,
+  waitForWarmupCaptcha: boolean,
+  recaptchaTimeoutMs: number,
+) {
+  const warmupUrl = getWarmupUrl(targetUrl);
+  if (!warmupUrl) {
+    await navigatePage(page, targetUrl);
+    return false;
+  }
+
+  console.log('warmup', warmupUrl);
+  await navigatePage(page, warmupUrl);
+
+  if (waitForWarmupCaptcha && (await hasCaptcha(page))) {
+    console.log('Captcha detected on warmup page; waiting before target navigation');
+    const waitedForGoogleSorry = await waitForGoogleSorryPageSolve(page, recaptchaTimeoutMs);
+    if (!waitedForGoogleSorry) {
+      await waitForRecaptchaSolve(page, recaptchaTimeoutMs);
+    }
+    await page.waitForNetworkIdle({ idleTime: 750, timeout: 15000 }).catch(() => undefined);
+  }
+
+  if (isRutrackerLoginUrl(targetUrl) && (await isRutrackerAuthenticated(page))) {
+    const authenticatedTarget = getRutrackerAuthenticatedTarget(targetUrl);
+    console.log(
+      `RuTracker session is already authenticated; skipping login form and navigating ${authenticatedTarget}`,
+    );
+    await navigatePage(page, authenticatedTarget, warmupUrl);
+    return true;
+  }
+
+  await navigatePage(page, targetUrl, warmupUrl);
+  return false;
 }
 
 function normalizeActionSelector(selector: string) {
@@ -262,10 +335,7 @@ function normalizeActionSelector(selector: string) {
   return normalized;
 }
 
-async function waitForCaptchaOrActionPage(
-  page: Page,
-  actions?: Action[],
-) {
+async function waitForCaptchaOrActionPage(page: Page, actions?: Action[]) {
   const firstFillAction = actions?.find(action => action.type === 'fill');
   const actionSelector = firstFillAction
     ? normalizeActionSelector(firstFillAction.selector)
@@ -370,9 +440,7 @@ async function executeActions(page: Page, actions?: Action[]) {
           const { value } = action;
           console.log(`Filling field ${selector}`);
           await element.evaluate(currentElement => {
-            const input = currentElement as
-              | HTMLInputElement
-              | HTMLTextAreaElement;
+            const input = currentElement as HTMLInputElement | HTMLTextAreaElement;
             input.focus();
             input.value = '';
             input.dispatchEvent(new Event('input', { bubbles: true }));
@@ -410,9 +478,7 @@ async function executeActions(page: Page, actions?: Action[]) {
         ]);
         console.log(`Navigation after click finished at ${page.url()}`);
       } else if (action.type === 'select') {
-        await page
-          .waitForNetworkIdle({ idleTime: 750, timeout: 10000 })
-          .catch(() => undefined);
+        await page.waitForNetworkIdle({ idleTime: 750, timeout: 10000 }).catch(() => undefined);
       }
     }
   }
@@ -428,9 +494,10 @@ export const openBrowserPuppeteer = async (
   const recaptchaTimeoutMs = options?.recaptchaTimeoutMs ?? 300000;
   let browser = await puppeteer.launch(getBrowserLaunchOptions(true));
   let page = await createConfiguredPage(browser, cookies, true);
+  let skipActions = false;
 
   try {
-    await navigatePage(page, url);
+    skipActions = await navigateToTarget(page, url, false, recaptchaTimeoutMs);
 
     if (waitForRecaptcha && (await hasCaptcha(page))) {
       console.log('Captcha detected; reopening Chromium in visible mode');
@@ -439,25 +506,22 @@ export const openBrowserPuppeteer = async (
 
       browser = await puppeteer.launch(getBrowserLaunchOptions(false));
       page = await createConfiguredPage(browser, cookies, false);
-      await navigatePage(page, url);
+      skipActions = await navigateToTarget(page, url, true, recaptchaTimeoutMs);
 
       if (await waitForCaptchaOrActionPage(page, actions)) {
-        const waitedForGoogleSorry = await waitForGoogleSorryPageSolve(
-          page,
-          recaptchaTimeoutMs,
-        );
+        const waitedForGoogleSorry = await waitForGoogleSorryPageSolve(page, recaptchaTimeoutMs);
 
         if (!waitedForGoogleSorry) {
           await waitForRecaptchaSolve(page, recaptchaTimeoutMs);
         }
 
-        await page
-          .waitForNetworkIdle({ idleTime: 750, timeout: 15000 })
-          .catch(() => undefined);
+        await page.waitForNetworkIdle({ idleTime: 750, timeout: 15000 }).catch(() => undefined);
       }
     }
 
-    await executeActions(page, actions);
+    if (!skipActions) {
+      await executeActions(page, actions);
+    }
 
     const content = await page.content();
     const finalUrl = page.url();

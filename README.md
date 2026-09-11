@@ -96,3 +96,24 @@ curl -X POST "http://localhost:9999/api" \
     "actions": []
   }'
 ```
+
+# SEO text generation
+
+Copy `.env.example` to `.env`, set `GEMINI_API_KEY` and `GROQ_API_KEY`, then restart
+the server. Gemini is used first and Groq is used automatically if Gemini fails.
+
+`POST http://localhost:9999/api/seo` accepts JSON:
+
+```json
+{
+  "title": "ELDEN RING Shadow of the Erdtree",
+  "year": "2022",
+  "genre": "Action / RPG",
+  "version": "1.17",
+  "description": "Original description",
+  "keywords": ["скачать торрент"]
+}
+```
+
+If `SEO_API_TOKEN` is configured, send `Authorization: Bearer <token>`. Without a
+token, this endpoint only accepts requests from localhost.
