@@ -1,3 +1,5 @@
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import puppeteer, { type Browser, type Cookie, type ElementHandle, type Page } from 'puppeteer';
 
 export interface Action {
@@ -21,6 +23,27 @@ export interface OpenBrowserOptions {
 
 const FULL_HD_VIEWPORT = { width: 1920, height: 1080 };
 
+function findInstalledBrowser() {
+  const programFiles = process.env.PROGRAMFILES || 'C:\\Program Files';
+  const programFilesX86 = process.env['PROGRAMFILES(X86)'] || 'C:\\Program Files (x86)';
+  const localAppData = process.env.LOCALAPPDATA || '';
+  const candidates = [
+    process.env.PUPPETEER_EXECUTABLE_PATH,
+    join(programFiles, 'Google', 'Chrome', 'Application', 'chrome.exe'),
+    join(programFilesX86, 'Google', 'Chrome', 'Application', 'chrome.exe'),
+    localAppData && join(localAppData, 'Google', 'Chrome', 'Application', 'chrome.exe'),
+    join(programFiles, 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
+    join(programFilesX86, 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
+    join(programFiles, 'BraveSoftware', 'Brave-Browser', 'Application', 'brave.exe'),
+    localAppData &&
+      join(localAppData, 'BraveSoftware', 'Brave-Browser', 'Application', 'brave.exe'),
+    'C:\\Soft\\Opera\\opera.exe',
+    localAppData && join(localAppData, 'Programs', 'Opera', 'opera.exe'),
+  ].filter((candidate): candidate is string => Boolean(candidate));
+
+  return candidates.find(existsSync);
+}
+
 async function waitForPageToSettle(page: Page) {
   await Promise.allSettled([
     page.waitForNetworkIdle({ idleTime: 750, timeout: 10000 }),
@@ -32,7 +55,7 @@ async function waitForPageToSettle(page: Page) {
 }
 
 function getBrowserLaunchOptions(headless: boolean): Parameters<typeof puppeteer.launch>[0] {
-  const executablePath = process.env.PUPPETEER_EXECUTABLE_PATH;
+  const executablePath = findInstalledBrowser();
   const userDataDir = process.env.PUPPETEER_USER_DATA_DIR || './chrome-user-data';
   const launchArgs = [
     '--disable-blink-features=AutomationControlled',

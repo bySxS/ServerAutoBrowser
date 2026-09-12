@@ -7,7 +7,7 @@
   "scripts": {
     "start": "node --env-file-if-exists=.env --watch server.ts",
     "start:prod": "node --env-file-if-exists=.env server.ts",
-    "build:cffsts": "tsc --noEmit && esbuild server.ts --bundle --packages=external --platform=node --format=esm --target=node23 --outfile=\"../../Delphi 7 Projects/CFFStS/ServerAutoBrowser/server.mjs\""
+    "build:cffsts": "tsc --noEmit && esbuild server.ts --bundle --platform=node --format=cjs --target=node23 --outfile=\"../../Delphi 7 Projects/CFFStS/ServerAutoBrowser/server.cjs\""
   },
   "author": "SxS",
   "license": "ISC",
