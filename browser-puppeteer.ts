@@ -23,6 +23,28 @@ export interface OpenBrowserOptions {
 }
 
 const FULL_HD_VIEWPORT = { width: 1920, height: 1080 };
+const BLOCKED_TRACKER_HOSTS = [
+  'counter.yadro.ru',
+  'counter.rambler.ru',
+  'mc.yandex.ru',
+  'google-analytics.com',
+  'googletagmanager.com',
+  'stats.g.doubleclick.net',
+  'ad.doubleclick.net',
+  'top-fwz1.mail.ru',
+  'top.mail.ru',
+];
+
+function isBlockedTrackerUrl(requestUrl: string) {
+  try {
+    const hostname = new URL(requestUrl).hostname.toLowerCase();
+    return BLOCKED_TRACKER_HOSTS.some(
+      blockedHost => hostname === blockedHost || hostname.endsWith(`.${blockedHost}`),
+    );
+  } catch {
+    return false;
+  }
+}
 
 function findInstalledBrowser() {
   const programFiles = process.env.PROGRAMFILES || 'C:\\Program Files';
@@ -233,6 +255,16 @@ async function createConfiguredPage(
 ): Promise<Page> {
   const page = await prepareBrowserPage(browser);
   await applyStealthSettings(page, headless);
+  await page.setRequestInterception(true);
+  page.on('request', request => {
+    if (isBlockedTrackerUrl(request.url())) {
+      console.log(`Blocking tracker ${request.url()}`);
+      void request.abort('blockedbyclient');
+      return;
+    }
+
+    void request.continue();
+  });
 
   if (cookies && Array.isArray(cookies)) {
     await browser.setCookie(...cookies);
@@ -244,8 +276,8 @@ async function createConfiguredPage(
 async function navigatePage(page: Page, url: string, referer?: string) {
   console.log('goto', url);
   await page.goto(url, {
-    waitUntil: ['domcontentloaded', 'networkidle0', 'networkidle2', 'load'],
-    timeout: 1000000,
+    waitUntil: 'domcontentloaded',
+    timeout: 60000,
     ...(referer ? { referer } : {}),
   });
 }
@@ -475,8 +507,8 @@ async function executeActions(page: Page, actions?: Action[]) {
         if (action.type === 'click') {
           console.log(`Clicking element ${selector}`);
           navigationPromise = page.waitForNavigation({
-            waitUntil: ['domcontentloaded', 'networkidle2'],
-            timeout: 30000,
+            waitUntil: 'domcontentloaded',
+            timeout: 15000,
           });
           await element.click();
         }
@@ -498,11 +530,11 @@ async function executeActions(page: Page, actions?: Action[]) {
       if (navigationPromise) {
         await Promise.allSettled([
           navigationPromise,
-          page.waitForNetworkIdle({ idleTime: 750, timeout: 30000 }),
+          page.waitForNetworkIdle({ idleTime: 500, timeout: 3000 }),
         ]);
         console.log(`Navigation after click finished at ${page.url()}`);
       } else if (action.type === 'select') {
-        await page.waitForNetworkIdle({ idleTime: 750, timeout: 10000 }).catch(() => undefined);
+        await page.waitForNetworkIdle({ idleTime: 500, timeout: 3000 }).catch(() => undefined);
       }
     }
   }
