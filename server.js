@@ -168,8 +168,8 @@ function createServer() {
                     }
                 });
             }); });
-            app.listen(9999, function () {
-                console.log("🚀 Server Auto Browser started http://localhost:9999");
+            app.listen(696, function () {
+                console.log("🚀 Server Auto Browser started http://localhost:696");
             });
             return [2 /*return*/];
         });

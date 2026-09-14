@@ -56,6 +56,6 @@ COPY . .
 
 RUN mkdir -p /app/chrome-user-data
 
-EXPOSE 9999
+EXPOSE 696
 
 CMD ["npm", "run", "start:prod"]

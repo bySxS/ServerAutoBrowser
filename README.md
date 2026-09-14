@@ -18,7 +18,7 @@ npm install
 npm run start
 ```
 
-Server starts on `http://localhost:9999`.
+Server starts on `http://localhost:696`.
 
 ## Docker
 
@@ -31,10 +31,10 @@ docker build -t server-auto-browser .
 Run container:
 
 ```bash
-docker run -d --name server-auto-browser -p 9999:9999 -v $(pwd)/chrome-user-data:/app/chrome-user-data --restart unless-stopped server-auto-browser
+docker run -d --name server-auto-browser -p 696:696 -v $(pwd)/chrome-user-data:/app/chrome-user-data --restart unless-stopped server-auto-browser
 ```
 
-The container includes Chromium and starts the app in production mode on port `9999`.
+The container includes Chromium and starts the app in production mode on port `696`.
 Browser profile data is stored in `/app/chrome-user-data`, so mounting that path keeps cookies and session state between restarts.
 
 ## Endpoints
@@ -53,19 +53,19 @@ Query params:
 Example:
 
 ```bash
-curl "http://localhost:9999/proxy?url=https://www.google.com"
+curl "http://localhost:696/proxy?url=https://www.google.com"
 ```
 
 JSON example:
 
 ```bash
-curl "http://localhost:9999/proxy?url=https://www.google.com&format=json"
+curl "http://localhost:696/proxy?url=https://www.google.com&format=json"
 ```
 
 Wait for manual captcha solving:
 
 ```bash
-curl "http://localhost:9999/proxy?format=json&waitForRecaptcha=true&recaptchaTimeoutMs=300000&url=https%3A%2F%2Fexample.com"
+curl "http://localhost:696/proxy?format=json&waitForRecaptcha=true&recaptchaTimeoutMs=300000&url=https%3A%2F%2Fexample.com"
 ```
 
 ### `POST /api`
@@ -89,7 +89,7 @@ Supported actions:
 Example:
 
 ```bash
-curl -X POST "http://localhost:9999/api" \
+curl -X POST "http://localhost:696/api" \
   -H "Content-Type: application/json" \
   -d '{
     "url": "https://example.com",
@@ -102,7 +102,7 @@ curl -X POST "http://localhost:9999/api" \
 Copy `.env.example` to `.env`, set `GEMINI_API_KEY` and `GROQ_API_KEY`, then restart
 the server. Gemini is used first and Groq is used automatically if Gemini fails.
 
-`POST http://localhost:9999/api/seo` accepts JSON:
+`POST http://localhost:696/api/seo` accepts JSON:
 
 ```json
 {

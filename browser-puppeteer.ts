@@ -19,6 +19,7 @@ export interface BrowserOpenResult {
 export interface OpenBrowserOptions {
   waitForRecaptcha?: boolean;
   recaptchaTimeoutMs?: number;
+  browserVisible?: boolean;
 }
 
 const FULL_HD_VIEWPORT = { width: 1920, height: 1080 };
@@ -515,21 +516,27 @@ export const openBrowserPuppeteer = async (
 ): Promise<BrowserOpenResult> => {
   const waitForRecaptcha = options?.waitForRecaptcha === true;
   const recaptchaTimeoutMs = options?.recaptchaTimeoutMs ?? 300000;
-  let browser = await puppeteer.launch(getBrowserLaunchOptions(true));
-  let page = await createConfiguredPage(browser, cookies, true);
+  const browserVisible = options?.browserVisible === true;
+console.log(`Launching Chromium in ${browserVisible ? 'visible' : 'hidden'} mode`);
+  let browser = await puppeteer.launch(getBrowserLaunchOptions(!browserVisible));
+  let page = await createConfiguredPage(browser, cookies, !browserVisible);
   let skipActions = false;
 
   try {
-    skipActions = await navigateToTarget(page, url, false, recaptchaTimeoutMs);
+    skipActions = await navigateToTarget(page, url, browserVisible, recaptchaTimeoutMs);
 
     if (waitForRecaptcha && (await hasCaptcha(page))) {
-      console.log('Captcha detected; reopening Chromium in visible mode');
-      await page.close();
-      await browser.close();
+      if (!browserVisible) {
+        console.log('Captcha detected; reopening Chromium in visible mode');
+        await page.close();
+        await browser.close();
 
-      browser = await puppeteer.launch(getBrowserLaunchOptions(false));
-      page = await createConfiguredPage(browser, cookies, false);
-      skipActions = await navigateToTarget(page, url, true, recaptchaTimeoutMs);
+        browser = await puppeteer.launch(getBrowserLaunchOptions(false));
+        page = await createConfiguredPage(browser, cookies, false);
+        skipActions = await navigateToTarget(page, url, true, recaptchaTimeoutMs);
+      } else {
+        console.log('Captcha detected in visible Chromium');
+      }
 
       if (await waitForCaptchaOrActionPage(page, actions)) {
         const waitedForGoogleSorry = await waitForGoogleSorryPageSolve(page, recaptchaTimeoutMs);

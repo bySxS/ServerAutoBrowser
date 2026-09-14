@@ -3,6 +3,8 @@ import type { Cookie } from 'puppeteer';
 import { openBrowserPuppeteer } from './browser-puppeteer.ts';
 import { generateSeoText, SeoError } from './seo-provider.ts';
 
+const DEFAULT_SERVER_PORT = 696;
+
 function serializeCookie(cookie: Cookie): string {
   // Synapse expects one stored cookie per line. Attributes from Set-Cookie are
   // not valid in the outgoing Cookie header and can corrupt its cookie parser.
@@ -71,6 +73,7 @@ async function createServer() {
     const url = normalizeUrl(req.query.url);
     const responseFormat = req.query.format === 'json' ? 'json' : 'html';
     const waitForRecaptcha = normalizeBoolean(req.query.waitForRecaptcha);
+    const browserVisible = normalizeBoolean(req.query.browserVisible);
     const recaptchaTimeoutMs = normalizePositiveNumber(req.query.recaptchaTimeoutMs, 300000);
 
     if (!url) {
@@ -83,6 +86,7 @@ async function createServer() {
       const result = await openBrowserPuppeteer(url, undefined, undefined, {
         waitForRecaptcha,
         recaptchaTimeoutMs,
+        browserVisible,
       });
 
       if (responseFormat === 'json') {
@@ -187,6 +191,7 @@ async function createServer() {
     const { cookies, actions } = req.body;
     const url = normalizeUrl(req.body?.url);
     const waitForRecaptcha = normalizeBoolean(req.body?.waitForRecaptcha);
+    const browserVisible = normalizeBoolean(req.body?.browserVisible);
     const recaptchaTimeoutMs = normalizePositiveNumber(req.body?.recaptchaTimeoutMs, 300000);
     console.log('url', url);
     if (!url) {
@@ -201,6 +206,7 @@ async function createServer() {
       const result = await openBrowserPuppeteer(url, cookies, actions, {
         waitForRecaptcha,
         recaptchaTimeoutMs,
+        browserVisible,
       });
       const cookieText = result?.cookies.map(serializeCookie).join('\r\n');
 
@@ -257,7 +263,7 @@ async function createServer() {
     configuredPort > 0 &&
     configuredPort <= 65535
       ? configuredPort
-      : 9999;
+      : DEFAULT_SERVER_PORT;
 
   const parentPidArgument = process.argv.find((argument) =>
     argument.startsWith('--parent-pid='),
@@ -275,12 +281,15 @@ async function createServer() {
     parentMonitor.unref();
   }
 
-  app.listen(port, '0.0.0.0', () => {
+  const httpServer = app.listen(port, '0.0.0.0', () => {
     if (!process.env.SEO_API_TOKEN) {
       console.warn('SEO_API_TOKEN is not set; /api/seo accepts localhost requests only');
     }
     console.log(`Server Auto Browser started http://localhost:${port}`);
   });
+  httpServer.on('error', error => console.error('Server listen error:', error));
+  httpServer.on('close', () => console.log('Server Auto Browser stopped'));
+  httpServer.ref();
 }
 
 createServer().then();
