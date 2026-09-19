@@ -137,7 +137,7 @@ function parseResult(text: unknown): SeoResult {
 async function generateWithGemini(input: SeoInput): Promise<SeoResult> {
   const apiKey = process.env.GEMINI_API_KEY?.trim();
   if (!apiKey) throw new Error('GEMINI_API_KEY is not configured');
-  const model = process.env.GEMINI_MODEL?.trim() || 'gemini-3.8-flash';
+  const model = process.env.GEMINI_MODEL?.trim() || 'gemini-3.5-flash-lite';
   const response = await fetchJson(
     `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,
     {
