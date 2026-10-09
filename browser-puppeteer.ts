@@ -540,6 +540,94 @@ async function executeActions(page: Page, actions?: Action[]) {
   }
 }
 
+function isRustorkaUrl(url: string): boolean {
+  try {
+    return /(^|\.)rustorka\.[a-z]+$/i.test(new URL(url).hostname);
+  } catch {
+    return false;
+  }
+}
+
+async function handleRustorkaLogin(page: Page, actions: Action[] | undefined, timeout: number) {
+  if (!isRustorkaUrl(page.url())) return false;
+  const loginForm = await page.$('input[name="login_password"]');
+  if (!loginForm) return false;
+  await loginForm.dispose();
+
+  // Only populate credentials. The user solves the challenge and submits the form.
+  for (const action of actions ?? []) {
+    if (action.type !== 'fill') continue;
+    const selector = normalizeActionSelector(action.selector);
+    if (!['[name="login_username"]', '[name="login_password"]'].includes(selector)) continue;
+    const field = await waitForVisibleElement(page, selector);
+    try {
+      await field.evaluate((element, value) => {
+        const input = element as HTMLInputElement;
+        input.value = value;
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+      }, action.value);
+    } finally {
+      await field.dispose();
+    }
+  }
+
+  await page.bringToFront();
+  console.log(`Rustorka: enter captcha manually and click Login; waiting up to ${timeout}ms for authentication`);
+  const authenticated = await page.waitForFunction(() => {
+    const visible = (element: Element) => {
+      const rect = element.getBoundingClientRect();
+      const style = getComputedStyle(element);
+      return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
+    };
+    if (Array.from(document.querySelectorAll('input[name="login_password"]')).some(visible)) return false;
+    return Array.from(document.querySelectorAll(
+      'a[href*="logout"], [onclick*="logout"], input[name="logout"], button[name="logout"]',
+    )).some(visible);
+  }, { timeout, polling: 500 });
+  await authenticated.dispose();
+  console.log('Rustorka: authentication confirmed; tracker verification is next');
+  return true;
+}
+
+async function waitForRustorkaTracker(page: Page, requestedUrl: string, loggedIn: boolean, timeout: number) {
+  if (!isRustorkaUrl(requestedUrl) || !isRustorkaUrl(page.url())) return;
+  const requested = new URL(requestedUrl);
+  const loginRequest = /\/(?:take)?login\.php$/i.test(requested.pathname);
+  const trackerRequest = /\/tracker\.php$/i.test(requested.pathname);
+  if (!loggedIn && !loginRequest && !trackerRequest) return;
+
+  // Keep search parameters when the original request was for tracker results.
+  const trackerUrl = trackerRequest ? requested.href : new URL('tracker.php', requested).href;
+  if (page.url() !== trackerUrl) {
+    await navigatePage(page, trackerUrl, page.url());
+  }
+  await page.bringToFront();
+  console.log(`Rustorka: waiting for tracker access (${timeout}ms); solve any captcha in this window`);
+  const ready = await page.waitForFunction(() => {
+    const visible = (element: Element) => {
+      const rect = element.getBoundingClientRect();
+      const style = getComputedStyle(element);
+      return rect.width > 0 && rect.height > 0 && style.display !== 'none' &&
+        style.visibility !== 'hidden' && Number(style.opacity) !== 0;
+    };
+    const hasVisible = (selector: string) =>
+      Array.from(document.querySelectorAll(selector)).some(visible);
+    if (!/\/tracker\.php$/i.test(location.pathname)) return false;
+    if (/just a moment|attention required/i.test(document.title)) return false;
+    if (hasVisible(
+      'input[name="login_password"], input[name="cfmcd"], ' +
+      'input[name*="captcha" i]:not([type="hidden"]), input[name="confirm_code"], ' +
+      '#challenge-running, form[action*="__cf_chl"], .cf-turnstile, .g-recaptcha, ' +
+      'iframe[src*="challenges.cloudflare.com"], iframe[src*="recaptcha"]',
+    )) return false;
+    // A normal forum header can also be present on a captcha page.
+    return hasVisible('#tor-tbl, form[action*="tracker.php"] input[name="nm"], #tracker-main input[name="nm"]');
+  }, { timeout, polling: 500 });
+  await ready.dispose();
+  console.log('Rustorka: tracker is available; collecting final cookies');
+}
+
 export const openBrowserPuppeteer = async (
   url: string,
   cookies?: Cookie[],
@@ -548,7 +636,7 @@ export const openBrowserPuppeteer = async (
 ): Promise<BrowserOpenResult> => {
   const waitForRecaptcha = options?.waitForRecaptcha === true;
   const recaptchaTimeoutMs = options?.recaptchaTimeoutMs ?? 300000;
-  const browserVisible = options?.browserVisible === true;
+  const browserVisible = options?.browserVisible === true || isRustorkaUrl(url);
 console.log(`Launching Chromium in ${browserVisible ? 'visible' : 'hidden'} mode`);
   let browser = await puppeteer.launch(getBrowserLaunchOptions(!browserVisible));
   let page = await createConfiguredPage(browser, cookies, !browserVisible);
@@ -581,9 +669,14 @@ console.log(`Launching Chromium in ${browserVisible ? 'visible' : 'hidden'} mode
       }
     }
 
-    if (!skipActions) {
+    const loginStartedAt = Date.now();
+    const manualLoginCompleted = await handleRustorkaLogin(page, actions, recaptchaTimeoutMs);
+    if (!skipActions && !manualLoginCompleted) {
       await executeActions(page, actions);
     }
+
+    await waitForRustorkaTracker(page, url, manualLoginCompleted,
+      Math.max(1, recaptchaTimeoutMs - (Date.now() - loginStartedAt)));
 
     const content = await page.content();
     const finalUrl = page.url();
