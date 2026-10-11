@@ -2,6 +2,7 @@ import express, { type Request, type Response } from 'express';
 import type { Cookie } from 'puppeteer';
 import { openBrowserPuppeteer } from './browser-puppeteer.ts';
 import { generateSeoText, SeoError } from './seo-provider.ts';
+import { generateEnglishMaterial } from './material-provider.ts';
 
 const DEFAULT_SERVER_PORT = 696;
 
@@ -253,6 +254,24 @@ async function createServer() {
         `[SEO] failed status=${statusCode} elapsedMs=${Date.now() - startedAt}:`,
         message,
       );
+      return res.status(statusCode).json({ success: false, error: message });
+    }
+  });
+
+  app.post('/api/material/english', async (req: Request, res: Response) => {
+    const startedAt = Date.now();
+    if (!isSeoRequestAuthorized(req)) {
+      return res.status(401).json({ success: false, error: 'Invalid AI API token' });
+    }
+    console.log(`[English material] request seo=${req.body?.seo === true} sourceLength=${req.body?.description?.length ?? 0}`);
+    try {
+      const generated = await generateEnglishMaterial(req.body);
+      console.log(`[English material] completed provider=${generated.provider} elapsedMs=${Date.now() - startedAt}`);
+      return res.status(200).json({ success: true, ...generated });
+    } catch (error) {
+      const statusCode = error instanceof SeoError ? error.statusCode : 502;
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('[English material] failed:', message);
       return res.status(statusCode).json({ success: false, error: message });
     }
   });

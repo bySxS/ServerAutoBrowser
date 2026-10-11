@@ -15,6 +15,13 @@ export type SeoResult = {
   keywords: string[];
 };
 
+type GenerationOptions = {
+  maxOutputTokens?: number;
+  temperature?: number;
+  reasoningEffort?: 'low' | 'medium' | 'high';
+  strictJson?: boolean;
+};
+
 export class SeoError extends Error {
   readonly statusCode: number;
 
@@ -134,7 +141,8 @@ function parseResult(text: unknown): SeoResult {
   };
 }
 
-async function generateWithGemini(input: SeoInput): Promise<SeoResult> {
+async function generateWithGemini(input: unknown, prompt: string, schema: unknown,
+  options: GenerationOptions): Promise<unknown> {
   const apiKey = process.env.GEMINI_API_KEY?.trim();
   if (!apiKey) throw new Error('GEMINI_API_KEY is not configured');
   const model = process.env.GEMINI_MODEL?.trim() || 'gemini-3.5-flash-lite';
@@ -144,54 +152,76 @@ async function generateWithGemini(input: SeoInput): Promise<SeoResult> {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
       body: JSON.stringify({
-        systemInstruction: { parts: [{ text: SEO_PROMPT }] },
+        systemInstruction: { parts: [{ text: prompt }] },
         contents: [{ role: 'user', parts: [{ text: JSON.stringify(input) }] }],
         generationConfig: {
-          temperature: 0.7,
+          temperature: options.temperature ?? 0.7,
+          ...(options.maxOutputTokens ? { maxOutputTokens: options.maxOutputTokens } : {}),
           responseMimeType: 'application/json',
-          responseSchema: SEO_SCHEMA,
+          responseSchema: schema,
         },
       }),
     },
   );
-  return parseResult(response?.candidates?.[0]?.content?.parts?.[0]?.text);
+  if (response?.candidates?.[0]?.finishReason === 'MAX_TOKENS') {
+    throw new Error('Translation output was truncated by the Gemini token limit');
+  }
+  return response?.candidates?.[0]?.content?.parts?.map((part: { text?: string }) => part.text ?? '').join('');
 }
 
-async function generateWithGroq(input: SeoInput): Promise<SeoResult> {
+async function generateWithGroq(input: unknown, prompt: string, schema: unknown,
+  options: GenerationOptions): Promise<unknown> {
   const apiKey = process.env.GROQ_API_KEY?.trim();
   if (!apiKey) throw new Error('GROQ_API_KEY is not configured');
   const model = process.env.GROQ_MODEL?.trim() || 'openai/gpt-oss-120b';
+  const isGptOss = /^openai\/gpt-oss-(20|120)b$/.test(model);
   const response = await fetchJson('https://api.groq.com/openai/v1/chat/completions', {
     method: 'POST',
     headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
       model,
-      temperature: 0.7,
-      response_format: { type: 'json_object' },
+      temperature: options.temperature ?? 0.7,
+      ...(options.maxOutputTokens ? { max_completion_tokens: options.maxOutputTokens } : {}),
+      ...(isGptOss && options.reasoningEffort ? { reasoning_effort: options.reasoningEffort } : {}),
+      response_format: options.strictJson && isGptOss
+        ? { type: 'json_schema', json_schema: {
+            name: 'structured_text', strict: true,
+            schema: { ...(schema as Record<string, unknown>), additionalProperties: false },
+          } }
+        : { type: 'json_object' },
       messages: [
-        { role: 'system', content: SEO_PROMPT },
+        { role: 'system', content: prompt },
         { role: 'user', content: JSON.stringify(input) },
       ],
     }),
   });
-  return parseResult(response?.choices?.[0]?.message?.content);
+  if (response?.choices?.[0]?.finish_reason === 'length') {
+    throw new Error('Translation output was truncated by the Groq token limit');
+  }
+  return response?.choices?.[0]?.message?.content;
 }
 
-export async function generateSeoText(
-  body: unknown,
-): Promise<{ provider: 'gemini' | 'groq'; result: SeoResult }> {
-  const input = normalizeInput(body);
+export async function generateStructuredText<T>(
+  input: unknown, prompt: string, schema: unknown,
+  parse: (text: unknown) => T, operation: string,
+  options: GenerationOptions = {},
+): Promise<{ provider: 'gemini' | 'groq'; result: T }> {
   const failures: string[] = [];
   try {
-    return { provider: 'gemini', result: await generateWithGemini(input) };
+    return { provider: 'gemini', result: parse(await generateWithGemini(input, prompt, schema, options)) };
   } catch (error) {
     failures.push(`Gemini: ${error instanceof Error ? error.message : String(error)}`);
-    console.warn('SEO generation with Gemini failed; trying Groq:', failures[0]);
+    console.warn(`${operation} with Gemini failed; trying Groq:`, failures[0]);
   }
   try {
-    return { provider: 'groq', result: await generateWithGroq(input) };
+    return { provider: 'groq', result: parse(await generateWithGroq(input, prompt, schema, options)) };
   } catch (error) {
     failures.push(`Groq: ${error instanceof Error ? error.message : String(error)}`);
   }
-  throw new SeoError(`All SEO providers failed. ${failures.join(' | ')}`);
+  throw new SeoError(`All AI providers failed. ${failures.join(' | ')}`);
+}
+
+export async function generateSeoText(body: unknown) {
+  return generateStructuredText(normalizeInput(body), SEO_PROMPT, SEO_SCHEMA,
+    parseResult, 'SEO generation');
 }

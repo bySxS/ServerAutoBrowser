@@ -117,3 +117,38 @@ the server. Gemini is used first and Groq is used automatically if Gemini fails.
 
 If `SEO_API_TOKEN` is configured, send `Authorization: Bearer <token>`. Without a
 token, this endpoint only accepts requests from localhost.
+
+### English material translation
+
+`POST http://localhost:696/api/material/english` uses the same authorization and
+Gemini-to-Groq fallback as `/api/seo`:
+
+```json
+{
+  "title": "Original title",
+  "shortDescription": "Original brief",
+  "description": "Full original material with BBCode or HTML",
+  "seo": false
+}
+```
+
+The response is `{success:true,provider,result:{title,shortDescription,description,seoDescription}}`.
+With `seo:false`, the complete material is translated and `seoDescription` is empty.
+With `seo:true`, a single provider request returns the translation and a separate
+English SEO description with the phrase `download torrent`; the application replaces
+the Description block, preserving technical sections. Markup and links are validated.
+HTML tags are replaced with protected placeholders before generation and restored
+verbatim afterwards, avoiding false failures caused by a model reformatting tags.
+Translation requests use an explicit 32,768-token output budget. GPT-OSS on Groq
+also uses low reasoning effort and strict JSON-schema output; truncated responses
+are rejected instead of being published.
+The full input description is limited to 50,000 characters; it is never silently truncated.
+
+The application has two independent translation settings:
+- Form1 translates loaded materials and can combine translation with English SEO.
+- Form4 translates only the outgoing title, brief and full text before publication,
+  leaving Form2 and the database unchanged. It does not read Form1 translation or SEO flags.
+  Failed translation cancels publication. Retries reuse the translated result.
+
+Run `node --test tests/material-provider.test.mjs` for provider regression tests.
+Run `npm run build:cffsts` to update the application server bundle.
